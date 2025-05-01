@@ -138,8 +138,6 @@ st.text("Refreshing map every 5 seconds...")
 time.sleep(5)
 
 
-
-
 # === CHATBOX ===
 # Ambil data sensor
 temp = get_ubidots_variable_value("temperature")
