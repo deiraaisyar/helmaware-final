@@ -136,3 +136,85 @@ st.map(location_data)
 
 st.text("Refreshing map every 5 seconds...")
 time.sleep(5)
+
+
+
+
+# === CHATBOX ===
+# Ambil data sensor
+temp = get_ubidots_variable_value("temperature")
+hum = get_ubidots_variable_value("humidity")
+alert = get_ubidots_variable_value("alert")
+
+# === KONFIGURASI GEMINI ===
+GEMINI_API_KEY = 'AIzaSyAqBof9P4D2d85k3YtopLOI_k3kJdYybvw'
+GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-002:generateContent?key={GEMINI_API_KEY}"
+
+def get_gemini_response(prompt, temp, hum, alert):
+    GEMINI_API_KEY = 'AIzaSyAqBof9P4D2d85k3YtopLOI_k3kJdYybvw'
+    GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-002:generateContent?key={GEMINI_API_KEY}"
+
+    # Data sensor sebagai konteks
+    sensor_info = f"""
+    Berikut adalah data sensor terbaru dari helm cerdas:
+    - Suhu: {temp:.1f}°C
+    - Kelembapan: {hum:.1f}%
+    - Status Bahaya: {'Bahaya terdeteksi' if alert == 1 else 'Tidak ada bahaya terdeteksi'}
+    """
+
+    # Prompt akhir untuk dikirim ke Gemini
+    full_prompt = f"""
+    Anda adalah asisten keselamatan dari sistem helm cerdas di dalam proyek konstruksi. Jawablah pertanyaan pengguna berdasarkan informasi ini:
+    {sensor_info}
+
+    Pertanyaan pengguna: {prompt}
+    """
+
+    headers = {
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "contents": [
+            {
+                "parts": [{"text": full_prompt}]
+            }
+        ]
+    }
+
+    try:
+        response = requests.post(GEMINI_API_URL, headers=headers, json=payload)
+        if response.status_code == 200:
+            return response.json()["candidates"][0]["content"]["parts"][0]["text"]
+        else:
+            return f"⚠️ Error dari Gemini API. Status: {response.status_code}\n{response.text}"
+    except Exception as e:
+        return f"⚠️ Terjadi error: {str(e)}"
+
+# === INTERFACE CHAT ===
+st.title("🛠️ HelmAware Chat Bot")
+
+prompt = st.chat_input("💬 Tanyakan sesuatu tentang kondisi sensor atau keselamatan...")
+
+if prompt:
+    st.chat_message("user").write(prompt)
+    prompt = prompt.lower()
+    reply = ""
+
+    # Jawaban langsung berdasarkan keyword
+    if "suhu" in prompt or "temperature" in prompt:
+        reply = f"🌡️ Sensor saat ini mendeteksi suhu sekitar **{temp:.1f}°C**." if temp else "⚠️ Data suhu tidak tersedia."
+    elif "kelembapan" in prompt or "humidity" in prompt:
+        reply = f"💧 Kelembapan saat ini sekitar **{hum:.1f}%**." if hum else "⚠️ Data kelembapan tidak tersedia."
+    elif "bahaya" in prompt or "alert" in prompt or "status" in prompt:
+        if alert == 1:
+            reply = "🚨 **Bahaya terdeteksi!** Segera lakukan pemeriksaan dan evakuasi bila perlu!"
+        elif alert == 0:
+            reply = "✅ Saat ini tidak terdeteksi kondisi berbahaya."
+        else:
+            reply = "⚠️ Status bahaya tidak bisa diambil sekarang."
+    else:
+        # Kirim ke Gemini dengan data sensor sebagai konteks
+        reply = get_gemini_response(prompt, temp, hum, alert)
+
+    st.chat_message("assistant").write(reply)
