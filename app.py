@@ -1,31 +1,30 @@
 import streamlit as st
-import pandas as pd
-import numpy as np
-import plotly.graph_objects as go
-from PIL import Image
+import cv2
 import time
-import random
+import numpy as np
+from geopy.distance import geodesic
+import pandas as pd
+from PIL import Image
+from datetime import datetime
+import requests
+from paho.mqtt import publish
+from ultralytics import YOLO
 
 # === SIDEBAR CONTROLS ===
 st.sidebar.header("🔧 Configuration")
 
-# Day/Night toggle
 mode = st.sidebar.radio("🌗 Select Mode", ["Day", "Night"])
 is_night = mode == "Night"
 
-# Camera toggle
-enable_camera = st.sidebar.checkbox("Enable Camera Input", value=True)
+enable_camera = st.sidebar.checkbox("Enable Camera Stream", value=True)
 temp_thresh = st.sidebar.slider("Temperature Alert Threshold (°C)", 25.0, 40.0, 30.0)
 humidity_thresh = st.sidebar.slider("Humidity Alert Threshold (%)", 30.0, 90.0, 70.0)
 
-# Real-time location input
 latitude = st.sidebar.number_input("Latitude", value=37.7749)
 longitude = st.sidebar.number_input("Longitude", value=-122.4194)
 
-# Simulated flame sensor toggle
 simulate_flame = st.sidebar.checkbox("🔥 Simulate Flame Detected", value=False)
 
-# Simulated OLED display text
 simulate_oled_text = f"""Temp Alert: >{temp_thresh}°C
 Humidity Alert: >{humidity_thresh}%
 Flame: {'YES' if simulate_flame else 'NO'}"""
@@ -36,11 +35,10 @@ text_color = "white" if is_night else "#333"
 card_color = "#003366" if is_night else "#ffffff"
 chart_template = "plotly_dark" if is_night else "plotly_white"
 
-# === CUSTOM CSS ===
 st.markdown(f"""
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Darker+Grotesque&display=swap');
-        
+
         body {{
             background-color: {background_color};
             font-family: 'Darker Grotesque', sans-serif;
@@ -65,12 +63,6 @@ st.markdown(f"""
             border-radius: 10px;
             box-shadow: 0px 0px 15px rgba(0, 0, 0, 0.5);
         }}
-
-        .camera-section {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -78,44 +70,120 @@ st.markdown(f"""
 img = Image.open('helmaware_header.jpg')
 st.image(img)
 
-st.markdown(f"<h1 class='header'>Welcome to HelmAware ({mode} Mode)</h1>", unsafe_allow_html=True)
-
 # === SENSOR SIMULATION ===
-st.markdown("<h3 class='big-font'>Temperature & Humidity Data</h3>", unsafe_allow_html=True)
-
 data = {
     'Time': pd.date_range(start='2025-04-01', periods=10, freq='D'),
     'Temperature': np.random.uniform(20, 35, 10),
     'Humidity': np.random.uniform(30, 80, 10),
 }
 df = pd.DataFrame(data)
+latest_temp = df['Temperature'].iloc[-1]
+latest_hum = df['Humidity'].iloc[-1]
 
-if df['Temperature'].max() > temp_thresh:
-    st.warning("🚨 Maximum temperature exceeds the set threshold!")
+# === TOP METRICS BAR ===
+st.markdown("## 🔍 Real-Time Sensor Overview")
+metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+metric_col1.metric("🌡️ Temperature", f"{latest_temp:.1f} °C")
+metric_col2.metric("💧 Humidity", f"{latest_hum:.1f} %")
+metric_col3.metric("📍 Latitude", f"{latitude:.5f}")
+metric_col4.metric("📍 Longitude", f"{longitude:.5f}")
 
-if df['Humidity'].max() > humidity_thresh:
-    st.warning("💧 Maximum humidity exceeds the set threshold!")
+# === MODEL LOADING ===
+model = YOLO("yolov8n.pt")  # Pastikan model YOLOv8 sudah terdownload dengan benar
 
-col1, col2 = st.columns(2)
-with col1:
-    fig_temp = go.Figure()
-    fig_temp.add_trace(go.Scatter(x=df['Time'], y=df['Temperature'], mode='lines+markers', name='Temperature (°C)', line=dict(color='red')))
-    fig_temp.update_layout(title='Temperature Over Time', xaxis_title='Time', yaxis_title='Temperature (°C)', template=chart_template)
-    st.plotly_chart(fig_temp)
+# === DETECTION FUNCTION ===
+def hazard_detection_stream(CAMERA_SNAPSHOT_URL, model, area_thresh, trigger_alert, reset_alert_if_needed):
+    with st.container():
+        st.markdown('<h2 style="text-align: left;">📷 Live Kamera & Deteksi Bahaya (YOLOv8)</h2>', unsafe_allow_html=True)
 
-with col2:
-    fig_humidity = go.Figure()
-    fig_humidity.add_trace(go.Scatter(x=df['Time'], y=df['Humidity'], mode='lines+markers', name='Humidity (%)', line=dict(color='blue')))
-    fig_humidity.update_layout(title='Humidity Over Time', xaxis_title='Time', yaxis_title='Humidity (%)', template=chart_template)
-    st.plotly_chart(fig_humidity)
+        cap = cv2.VideoCapture(CAMERA_SNAPSHOT_URL)
 
-# === CAMERA SECTION ===
-if enable_camera:
-    st.markdown("<h3 class='big-font'>Camera</h3>", unsafe_allow_html=True)
-    picture = st.camera_input("Capture Image")
-    if picture:
-        st.image(picture, caption="Captured Image", use_column_width=True)
+        if not cap.isOpened():
+            st.error("❌ Gagal membuka stream dari ESP32-CAM.")
+        else:
+            ret, frame = cap.read()
+            cap.release()
 
+            if ret and frame is not None:
+                results = model(frame)[0]
+                annotated = results.plot()
+                hazard_detected = False
+
+                for box in results.boxes:
+                    cls = int(box.cls[0])
+                    label = model.names[cls]
+                    x1, y1, x2, y2 = box.xyxy[0]
+                    area = (x2 - x1) * (y2 - y1)
+
+                    if label == "person":
+                        if area > area_thresh:
+                            hazard_detected = True
+                            trigger_alert()
+                            st.session_state.logs.append(
+                                f"[{datetime.now().strftime('%H:%M:%S')}] 🚨 {label.upper()} - Area: {int(area)}"
+                            )
+                        else:
+                            st.session_state.logs.append(
+                                f"[{datetime.now().strftime('%H:%M:%S')}] ℹ️ {label.upper()} detected - Area: {int(area)} (too small)"
+                            )
+                        break  # Stop after first person
+
+                if not hazard_detected:
+                    reset_alert_if_needed()
+
+                st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), channels="RGB")
+            else:
+                st.warning("⚠️ Gagal membaca frame dari stream.")
+# === KAMERA STREAM ===
+# Definisikan URL kamera di sini
+CAMERA_SNAPSHOT_URL = 'http://your_camera_ip_or_url_here'  # Gantilah dengan URL kamera yang benar
+
+# Penggunaan cv2.VideoCapture
+cap = cv2.VideoCapture(CAMERA_SNAPSHOT_URL)
+
+with st.container():
+    st.markdown('<h2 style="text-align: left;">📷 Live Kamera & Deteksi Bahaya (YOLOv8)</h2>', unsafe_allow_html=True)
+
+    cap = cv2.VideoCapture(CAMERA_SNAPSHOT_URL)
+
+    if not cap.isOpened():
+        st.error("❌ Gagal membuka stream dari ESP32-CAM.")
+    else:
+        ret, frame = cap.read()
+        cap.release()
+
+        if ret and frame is not None:
+            results = model(frame)[0]
+            annotated = results.plot()
+            hazard_detected = False
+
+            for box in results.boxes:
+                cls = int(box.cls[0])
+                label = model.names[cls]
+                x1, y1, x2, y2 = box.xyxy[0]
+                area = (x2 - x1) * (y2 - y1)
+
+                if label == "person":
+                    if area > area_thresh:
+                        hazard_detected = True
+                        trigger_alert()
+                        st.session_state.logs.append(
+                            f"[{datetime.now().strftime('%H:%M:%S')}] 🚨 {label.upper()} - Area: {int(area)}"
+                        )
+                    else:
+                        st.session_state.logs.append(
+                            f"[{datetime.now().strftime('%H:%M:%S')}] ℹ️ {label.upper()} detected - Area: {int(area)} (too small)"
+                        )
+                    break  # Stop after first person
+
+            if not hazard_detected:
+                reset_alert_if_needed()
+
+            st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), channels="RGB")
+        else:
+            st.warning("⚠️ Gagal membaca frame dari stream.")
+
+            
 # === FLAME SENSOR ===
 st.markdown("<h3 class='big-font'>🔥 Flame Sensor Status</h3>", unsafe_allow_html=True)
 if simulate_flame:
@@ -123,22 +191,14 @@ if simulate_flame:
 else:
     st.success("✅ No Flame Detected.")
 
-# === OLED DISPLAY ===
-st.markdown("<h3 class='big-font'>🖥️ OLED Display</h3>", unsafe_allow_html=True)
-with st.container():
-    st.code(simulate_oled_text, language="text")
-st.caption("This simulates what an OLED display connected to a Raspberry Pi might show in real-time.")
-
 # === MAP SECTION ===
 st.markdown("<h3 class='big-font'>📍 Real-Time Worker Location Map</h3>", unsafe_allow_html=True)
 location_data = pd.DataFrame({'lat': [latitude], 'lon': [longitude]})
 st.map(location_data)
 
 st.text("Refreshing map every 5 seconds...")
-time.sleep(5)
 
-
-# === CHATBOX ===
+# === CHATBOT SECTION ===
 # Ambil data sensor
 temp = get_ubidots_variable_value("temperature")
 hum = get_ubidots_variable_value("humidity")
