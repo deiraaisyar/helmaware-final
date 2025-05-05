@@ -1,0 +1,11 @@
+streamlit
+pandas
+requests
+opencv-python-headless
+paho-mqtt
+ultralytics
+Pillow
+google-generativeai
+geopy
+python-dotenv
+dotenv
