@@ -79,7 +79,6 @@ Construction sites are prone to various safety hazards such as smoke, fire, unau
 | **ESP32 WROOM Module** | Main controller for receiving sensor data   |
 | **DHT11 Sensor**       | Measures temperature and humidity           |
 | **Flame Sensor**       | Detects fire or sudden flame presence       |
-| **PIR Sensor**         | Detects motion around the equipment         |
 | **Ultrasonic Sensor**  | Measures distance to detect proximity       |
 | **GPS Module**         | Logs the physical location of the device    |
 | **Buzzer Module**      | Sounds alarm during hazardous events        |
