@@ -1,0 +1,16 @@
+{
+    "nav": {
+        "home": "Home",
+        "about": "About",
+        "projects": "Projects",
+        "experience": "Experience",
+        "contact": "Contact"
+    },
+    "hero": {
+        "badge": "Computer Science Student",
+        "title": "Building software that creates impact.",
+        "description": "I’m Regina Joan, a Computer Science student at Universitas Gadjah Mada focused on software engineering, AI, machine learning, and product development.",
+        "primaryButton": "View Projects",
+        "secondaryButton": "Contact Me"
+    }
+}

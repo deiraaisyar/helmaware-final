@@ -1,0 +1,16 @@
+{
+    "nav": {
+        "home": "Beranda",
+        "about": "Tentang",
+        "projects": "Proyek",
+        "experience": "Pengalaman",
+        "contact": "Kontak"
+    },
+    "hero": {
+        "badge": "Mahasiswa Ilmu Komputer",
+        "title": "Membangun perangkat lunak yang memberikan dampak.",
+        "description": "Saya Regina Joan, mahasiswa Ilmu Komputer Universitas Gadjah Mada yang berfokus pada software engineering, AI, machine learning, dan product development.",
+        "primaryButton": "Lihat Proyek",
+        "secondaryButton": "Hubungi Saya"
+    }
+}
